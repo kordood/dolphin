@@ -31,6 +31,7 @@ public:
   struct AssetData
   {
     std::unique_ptr<CustomAsset> asset;
+    const void* type_key = nullptr;
 
     std::vector<AssetListener*> listeners;
 
@@ -50,19 +51,36 @@ public:
   T* CreateAsset(const CustomAssetLibrary::AssetID& asset_id,
                  std::shared_ptr<VideoCommon::CustomAssetLibrary> library, AssetListener* listener)
   {
+    // Unique for each asset type. Not const, so that the linker can't merge it (MSVC /OPT:ICF)
+    static char s_type_key;
+    const void* const type_key = &s_type_key;
+
     const auto [it, added] =
         m_asset_id_to_handle.try_emplace(asset_id, m_asset_handle_to_data.size());
-    if (added)
+    std::size_t handle = it->second;
+    if (!added && m_asset_handle_to_data[handle].type_key != type_key)
+    {
+      // The asset id is already used by another asset type, look for an asset of this type
+      handle = m_asset_handle_to_data.size();
+      for (const auto& [other_handle, other_data] : m_asset_handle_to_data)
+      {
+        if (other_data.type_key == type_key && other_data.asset->GetAssetId() == asset_id)
+          handle = other_handle;
+      }
+    }
+
+    if (handle == m_asset_handle_to_data.size())
     {
       AssetData asset_data;
-      asset_data.asset = std::make_unique<T>(std::move(library), asset_id, it->second);
+      asset_data.asset = std::make_unique<T>(std::move(library), asset_id, handle);
+      asset_data.type_key = type_key;
       asset_data.load_request_time = {};
       asset_data.has_load_error = false;
 
-      m_asset_handle_to_data.insert_or_assign(it->second, std::move(asset_data));
+      m_asset_handle_to_data.insert_or_assign(handle, std::move(asset_data));
     }
 
-    auto& asset_data_from_handle = m_asset_handle_to_data[it->second];
+    auto& asset_data_from_handle = m_asset_handle_to_data[handle];
     asset_data_from_handle.listeners.push_back(listener);
     asset_data_from_handle.load_status = AssetData::LoadStatus::PendingReload;
 

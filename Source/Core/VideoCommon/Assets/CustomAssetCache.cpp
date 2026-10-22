@@ -93,17 +93,19 @@ void CustomAssetCache::ProcessDirtyAssets()
   const auto now = CustomAsset::ClockType::now();
   for (const auto& asset_id : dirty_assets)
   {
-    if (const auto it = m_asset_id_to_handle.find(asset_id); it != m_asset_id_to_handle.end())
+    // The same asset id can be used by more than one asset type
+    for (auto& [asset_handle, asset_data] : m_asset_handle_to_data)
     {
-      const auto asset_handle = it->second;
-      AssetData& asset_data = m_asset_handle_to_data[asset_handle];
+      if (asset_data.asset->GetAssetId() != asset_id)
+        continue;
+
       asset_data.load_status = AssetData::LoadStatus::PendingReload;
       asset_data.load_request_time = now;
 
       // Asset was reloaded, clear any errors we might have
       asset_data.has_load_error = false;
 
-      m_pending_assets.InsertAsset(it->second, asset_data.asset.get());
+      m_pending_assets.InsertAsset(asset_handle, asset_data.asset.get());
 
       DEBUG_LOG_FMT(VIDEO, "Dirty asset pending reload: {}", asset_data.asset->GetAssetId());
     }
